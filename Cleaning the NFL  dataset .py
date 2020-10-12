@@ -365,3 +365,250 @@ DefensePersonnel = {'2 DL, 3 LB, 6 DB': 0, '4 DL, 4 LB, 3 DB': 0.5, '3 DL, 2 LB,
 nfl.isnull().sum()
 nfl.shape
 nfl
+
+
+######################################33
+#NEURAL NETWORK
+players_col = []
+for col in nfl.columns:
+    if nfl[col][:22].std()!=0:
+        players_col.append(col)
+#x training set 
+X_train = np.array(nfl[players_col]).reshape(-1, len(players_col)*22)
+
+play_col = nfl.drop(players_col+['Yards'], axis=1).columns
+X_play_col = np.zeros(shape=(X_train.shape[0], len(play_col)))
+for i, col in enumerate(play_col):
+    X_play_col[:, i] = nfl[col][::22]
+
+#concatenating x_train and x_play_col
+x = np.concatenate([X_train, X_play_col], axis=1)
+
+#creating the target class of -99 to 99
+y_train = np.zeros(shape=(x.shape[0], 199))
+for i,yard in enumerate(nfl['Yards'][::22]):
+    y_train[i, yard+99:] = np.ones(shape=(1, 100-yard))
+
+#scaling the data set
+from sklearn.preprocessing import StandardScaler
+sc_x = StandardScaler()
+x_train = sc_x.fit_transform(x)
+
+# from sklearn.model_selection import train_test_split
+# x_train = train_test_split(x, random_state=101)
+import keras
+from keras.wrappers.scikit_learn import KerasClassifier
+from keras.utils import np_utils
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import Pipeline
+import keras.backend as K
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from keras.callbacks import ReduceLROnPlateau, ModelCheckpoint, EarlyStopping
+from keras.utils import plot_model
+import keras.backend as K
+import tensorflow as tf
+
+# my model
+model = keras.models.Sequential([
+    keras.layers.Dense(units=300, input_shape=[x_train.shape[1]], activation='relu'),
+    keras.layers.BatchNormalization(),
+    keras.layers.Dropout(0.2),
+    keras.layers.Dense(units=256, activation='relu'),
+    keras.layers.BatchNormalization(),
+    keras.layers.Dropout(0.2),
+    keras.layers.Dense(units=199, activation='sigmoid')
+])
+#trainig the model 
+model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy']) 
+model.fit(x_train, y_train, epochs=30,  batch_size=30)
+
+def make_pred (test, sample, env, model):
+    #runnung everthing from the top again but on the test data
+    test.drop(labels = ['GameId', 'PlayId','NflId', 'DisplayName', 'JerseyNumber', 'Season',
+       'NflIdRusher','PlayerCollegeName', 'HomeTeamAbbr', 'VisitorTeamAbbr',
+         'Stadium', 'Location', 'TimeHandoff', 'TimeSnap', 'WindSpeed', 'Team'], inplace = True, axis=1)
+    test["GameWeather"].fillna( method ='ffill', inplace = True)
+    test["Temperature"].fillna( method ='ffill', inplace = True)
+    test["Humidity"].fillna( method ='ffill', inplace = True)
+#     test["WindSpeed"].fillna( method ='ffill', inplace = True)
+    test["WindDirection"].fillna( method ='ffill', inplace = True)
+    test["FieldPosition"].fillna( method ='ffill', inplace = True)
+    test["Orientation"].fillna( method ='ffill', inplace = True)
+    test["Dir"].fillna( method ='ffill', inplace = True)
+    test["OffenseFormation"].fillna( method ='ffill', inplace = True)
+    test["DefendersInTheBox"].fillna( method ='ffill', inplace = True)
+#     test["WindSpeed"].fillna( method ='ffill', inplace = True)
+    test["StadiumType"].fillna( method ='ffill', inplace = True)
+    
+#     Team = {'home':1, 'away':0}
+#     test['Team'] = test['Team'].map(Team)
+
+    arr = test['GameClock'].unique()
+    count = {}
+    for i in arr:
+        if i not in count:
+            count[i] = get_sec(i)
+    GameClock = count
+    test['GameClock'] = test['GameClock'].map(GameClock)
+    
+    PossessionTeam = {'NE': 0,'KC': 0.5, 'BUF': 1.0, 'NYJ': 1.5, 'ATL': 2.0, 'CHI': 2.5, 'CIN': 3.0, 'BLT': 3.5, 'CLV': 4.0,
+     'PIT': 4.5, 'ARZ': 5.0, 'DET': 5.5, 'JAX': 6.0, 'HST': 6.5, 'OAK': 7.0, 'TEN': 7.5, 'WAS': 8.0,
+     'PHI': 8.5, 'LA': 9.0, 'IND': 9.5, 'SEA': 10.0, 'GB': 10.5, 'CAR': 11.0, 'SF': 11.5, 'DAL': 12.0,
+     'NYG': 12.5, 'NO': 13.0, 'MIN': 13.5, 'DEN': 14.0, 'LAC': 14.5, 'TB': 15.0, 'MIA': 15.5}
+    test['PossessionTeam'] = test['PossessionTeam'].map(PossessionTeam)
+    
+    test['FieldPosition'] = test['FieldPosition'].map(PossessionTeam)
+    
+    OffenseFormation= {'SHOTGUN': 0,'SINGLEBACK': 0.5,'JUMBO': 1.0, 'PISTOL': 1.5, 'I_FORM': 2.0, 'ACE': 2.5,
+     'WILDCAT': 3.0,'EMPTY': 3.5}
+    test['OffenseFormation'] = test['OffenseFormation'].map(OffenseFormation)
+    
+    test['DefendersInTheBox'] = test['DefendersInTheBox'].astype(int)
+    
+    PlayDirection= {'left':0, 'right':1}
+    test['PlayDirection'] = test['PlayDirection'].map(PlayDirection)
+    
+    test['PlayerHeight'] = test['PlayerHeight'].apply(inches)
+    
+    test['PlayerBirthDate'] = test['PlayerBirthDate'].apply(calculate_age)
+    
+    test["BMI"] = 703*(test['PlayerWeight']/(test['PlayerHeight'])**2)
+    
+    Position = {'SS': 0,'DE': 0.2, 'ILB': 0.4, 'FS': 0.6000000000000001, 'CB': 0.8, 'DT': 1.0, 'WR': 1.2,
+        'TE': 1.4, 'T': 1.5999999999999999, 'QB': 1.7999999999999998, 'RB': 1.9999999999999998,
+     'G': 2.1999999999999997, 'C': 2.4, 'OLB': 2.6, 'NT': 2.8000000000000003, 'FB': 3.0000000000000004,
+     'MLB': 3.2000000000000006, 'LB': 3.400000000000001, 'OT': 3.600000000000001, 'OG': 3.800000000000001,
+     'HB': 4.000000000000001, 'DB': 4.200000000000001, 'S': 4.400000000000001, 'DL': 4.600000000000001,
+     'SAF': 4.800000000000002}
+    test['Position'] = test['Position'].map(Position)
+    
+    
+    StadiumType = {'Outdoor': 'Outdoor','Outdoors': 'Outdoor','Indoors': 'Indoor','Retractable Roof': 'Indoor','Indoor': 'Indoor','Retr. Roof-Closed': 'Indoor',
+     'Open': 'Outdoor','Indoor, Open Roof': 'Outdoor','Retr. Roof - Closed': 'Indoor','Outddors': 'Outdoor','Dome': 'Indoor','Domed, closed': 'Indoor','Indoor, Roof Closed': 'Indoor',
+     'Retr. Roof Closed': 'Indoor','Outdoor Retr Roof-Open': 'Outdoor','Closed Dome': 'Indoor','Oudoor': 'Outdoor','Ourdoor': 'Outdoor','Dome, closed': 'Indoor',
+     'Retr. Roof-Open': 'Outdoor','Heinz Field': 'Outdoor','Outdor': 'Outdoor','Retr. Roof - Open': 'Outdoor','Domed, Open': 'Outdoor','Domed, open': 'Outdoor','Cloudy': 'Outdoor',
+     'Bowl': 'Outdoor','Outside': 'Outdoor','Domed': 'Indoor'}
+    test['StadiumType'] = test['StadiumType'].map(StadiumType)
+    StadiumType = get_count(test['StadiumType'].unique())
+    test['StadiumType'] = test['StadiumType'].map(StadiumType)
+    
+    
+    Turf = {'Field Turf': 'Field Turf','A-Turf Titan': 'A-Turf Titan','Grass': 'Grass','UBU Sports Speed S5-M': 'UBU Sports Speed S5-M','Artificial': 'Artificial',
+     'DD GrassMaster': 'Grass', 'Natural Grass': 'Grass','UBU Speed Series-S5-M': 'UBU Sports Speed S5-M','FieldTurf': 'Field Turf', 'FieldTurf 360': 'Field Turf',
+     'Natural grass': 'Grass','grass': 'Grass', 'Natural': 'Grass','Artifical': 'Artificial','FieldTurf360': 'Field Turf','Naturall Grass': 'Grass','Field turf': 'Field Turf',
+     'SISGrass': 'Grass','Twenty-Four/Seven Turf': 'Twenty-Four/Seven Turf','natural grass': 'Grass'}
+    test['Turf'] = test['Turf'].map(Turf)
+    Turf={'Field Turf': 0,'A-Turf Titan': 0.2, 'Grass': 0.4, 'UBU Sports Speed S5-M': 0.6000000000000001,
+      'Artificial': 0.8, 'Twenty-Four/Seven Turf': 1.0}
+    test['Turf'] = test['Turf'].map(Turf)
+    
+    
+    GameWeather = {'Clear and warm': 'Clear','Sun & clouds': 'Sunny', 'Sunny': 'Sunny', 'Controlled Climate': 'Controlled Climate' ,'Mostly Sunny': 'Sunny',
+     'Clear': 'Clear','Indoor': 'Controlled Climate','Mostly Cloudy': 'Cloudy','Mostly Coudy': 'Cloudy','Partly sunny': 'Sunny','Partly Cloudy': 'Cloudy','Cloudy': 'Cloudy',
+     'Sunny, highs to upper 80s': 'Sunny','Indoors': 'Controlled Climate','Light Rain': 'Rain', 'Showers': 'Rain', 'Partly cloudy': 'Cloudy', 'Partly Sunny': 'Sunny',
+    '30% Chance of Rain': 'Rain','Cloudy with periods of rain, thunder possible. Winds shifting to WNW, 10-20 mph.': 'Cloudy','Rain': 'Rain', 'Cloudy, fog started developing in 2nd quarter': 'Cloudy',
+     'Coudy': 'Cloudy','Rain likely, temps in low 40s.': 'Rain','Cold': 'Cold', 'N/A (Indoors)': 'Controlled Climate', 'Clear skies': 'Clear', 'cloudy': 'Cloudy', 'Fair': 'Cloudy',
+     'Mostly cloudy': 'Cloudy', 'Cloudy, chance of rain': 'Cloudy', 'Heavy lake effect snow': 'Cold', 'Party Cloudy': 'Cloudy', 'Cloudy, light snow accumulating 1-3"': 'Cloudy',
+     'Cloudy and cold': 'Cloudy', 'Snow': 'Cold', 'Hazy': 'Rain', 'Scattered Showers': 'Rain', 'Cloudy and Cool': 'Cloudy', 'N/A Indoor': 'Controlled Climate', 'Rain Chance 40%': 'Rain',
+     'Clear and sunny': 'Sunny', 'Mostly sunny': 'Sunny', 'Sunny and warm': 'Sunny', 'Partly clear': 'Clear', 'Cloudy, 50% change of rain': 'Cloudy', 'Clear and Sunny': 'Sunny',
+     'Sunny, Windy': 'Sunny', 'Clear and Cool': 'Clear', 'Sunny and clear': 'Sunny', 'Mostly Sunny Skies': 'Sunny', 'Partly Clouidy': 'Cloudy', 'Clear Skies': 'Clear',
+     'Sunny Skies': 'Sunny', 'Overcast': 'Cloudy', 'T: 51; H: 55; W: NW 10 mph': 'Cloudy', 'Cloudy, Rain': 'Cloudy', 'Rain shower': 'Rain', 'Clear and cold': 'Clear', 'Rainy': 'Rain',
+     'Sunny and cold': 'Sunny'}
+    test['GameWeather'] = test['GameWeather'].map(GameWeather)
+    GameWeather ={'Clear': 0,'Sunny': 0.2, 'Controlled Climate': 0.4, 'Cloudy': 0.6000000000000001,
+     'Rain': 0.8, 'Cold': 1.0}
+    test['GameWeather'] = test['GameWeather'].map(GameWeather)
+    
+#     WindSpee = {8.0: '8', 6.0: '6', 10.0: '10', 9.0: '9', 11.0: '11', 7.0: '7', 5.0: '5', 2.0: '2', 12.0: '12', 1: '1', 3: '3', 4: '4', 13: '13', '10': '10', '5': '5', '6': '6',
+#       '4':'4','8': '8', '0': '0', 'SSW': '0', 14.0: '14', 0.0: '0', 15.0: '15', 17.0: '17', 18.0: '18', 16.0: '16', '11-17': '14', '16': '16', '14': '14', '13' : '13',  '12': '12',
+#      '23': '23', '7': '7', '9': '9', '3': '3', '17': '17', '14-23': '19', '1': '1', '13 MPH': '13', 24.0: '24', '15': '15', '12-22': '17', '2': '2', '4 MPh': '4', '15 gusts up to 25': '20',
+#      '11': '11', '10MPH': '10', '10mph': '10', '22': '22', 'E': '22', '7 MPH': '7', 'Calm': '7', '6 mph': '6', '19': '19', 'SE': '19', '20': '20', '10-20': '20', '12mph': '12'}
+#     test['WindSpeed'] = test['WindSpeed'].map(WindSpee)
+#     test["WindSpeed"].fillna( method ='ffill', inplace = True)
+#     test['WindSpeed'] = test['WindSpeed'].astype(int)
+    
+    
+    Wind_direction = {'SW': 'SW', 'NNE': 'NNE', 'SE': 'SE', 'East': 'East', 'NE': 'NE', 'North': 'North', 'S': 'S', 'Northwest': 'Northwest', 'SouthWest': 'SW', 'ENE': 'ENE',
+                  'ESE': 'ESE', 'SSW': 'SSW','NW': 'Northwest', 'Northeast': 'NE', 'From S': 'S', 'W': 'W', 'South': 'S', 'West-Southwest': 'WSW', 
+                  'E': 'East', '13': 'East', 'N': 'North', 'NNW': 'NNW', 'South Southeast': 'SSE', 'SSE': 'SSE','West': 'W', 'WSW': 'WSW', 'From SW': 'SW', 'WNW': 'WNW',
+                      's': 'S', 'NorthEast': 'NE', 'from W': 'W', 'W-NW': 'WNW', 'South Southwest': 'SSW', 'Southeast': 'SE', 'From WSW': 'WSW', 'West Northwest': 'WNW',
+     'Calm': 'S', 'From SSE': 'SSE', 'From W': 'W', 'East North East': 'ENE', 'From ESE': 'ESE', 'EAST': 'East', 'East Southeast': 'ESE', 'From SSW': 'SSW', '8': 'W', 'North East': 'NE',
+     'Southwest': 'SW', 'North/Northwest': 'NNW', 'From NNE': 'NNE', '1': 'N', 'N-NE': 'NNE', 'W-SW': 'WSW','From NNW': 'NNW'}
+    test['WindDirection'] = test['WindDirection'].map(Wind_direction)
+    WindDirection={'SW': 0, 'NNE': 0.5, 'SE': 1.0, 'East': 1.5, 'NE': 2.0, 'North': 2.5, 'S': 3.0,
+     'Northwest': 3.5, 'ENE': 4.0, 'ESE': 4.5, 'SSW': 5.0, 'W': 5.5, 'WSW': 6.0,
+     'NNW': 6.5, 'SSE': 7.0, 'WNW': 7.5, 'N': 8.0}
+    test['WindDirection'] = test['WindDirection'].map(WindDirection)
+    
+    OffensePersonnel = {'1 RB, 1 TE, 3 WR': 0, '6 OL, 2 RB, 2 TE, 0 WR': 0.5, '1 RB, 3 TE, 1 WR': 1.0,
+     '1 RB, 2 TE, 2 WR': 1.5, '6 OL, 1 RB, 2 TE, 1 WR': 2.0, '2 RB, 1 TE, 2 WR': 2.5,
+     '2 RB, 2 TE, 1 WR': 3.0, '0 RB, 3 TE, 2 WR': 3.5, '0 RB, 1 TE, 4 WR': 4.0, '6 OL, 1 RB, 0 TE, 3 WR': 4.5,
+    '6 OL, 1 RB, 1 TE, 2 WR': 5.0,'1 RB, 2 TE, 1 WR,1 DL': 5.5, '1 RB, 3 TE, 0 WR,1 DL': 6.0,
+     '1 RB, 0 TE, 4 WR': 6.5, '1 RB, 1 TE, 2 WR,1 DL': 7.0, '6 OL, 2 RB, 0 TE, 2 WR': 7.5,
+     '2 RB, 0 TE, 3 WR': 8.0, '6 OL, 2 RB, 1 TE, 1 WR': 8.5, '7 OL, 1 RB, 0 TE, 2 WR': 9.0, '7 OL, 2 RB, 0 TE, 1 WR': 9.5,
+     '7 OL, 1 RB, 2 TE, 0 WR': 10.0, '2 RB, 3 TE, 0 WR': 10.5, '3 RB, 1 TE, 1 WR': 11.0,
+     '6 OL, 1 RB, 3 TE, 0 WR': 11.5, '6 OL, 1 RB, 2 TE, 0 WR,1 DL': 12.0, '2 RB, 3 TE, 1 WR': 12.5,
+     '6 OL, 1 RB, 1 TE, 1 WR,1 DL': 13.0, '1 RB, 4 TE, 0 WR': 13.5, '1 RB, 2 TE, 1 WR,1 LB': 14.0,
+     '1 RB, 3 TE, 0 WR,1 LB': 14.5, '7 OL, 2 RB, 1 TE, 0 WR': 15.0, '0 RB, 2 TE, 3 WR': 15.5,
+     '1 RB, 0 TE, 3 WR,1 DB': 16.0, '6 OL, 1 RB, 2 TE, 0 WR,1 LB': 16.5, '1 RB, 1 TE, 2 WR,1 DB': 17.0,
+     '0 RB, 0 TE, 5 WR': 17.5, '1 RB, 2 TE, 3 WR': 18.0, '1 RB, 1 TE, 2 WR,1 LB': 18.5,
+     '1 RB, 3 TE, 0 WR,1 DB': 19.0, '6 OL, 2 RB, 1 TE, 0 WR,1 DL': 19.5, '2 QB, 1 RB, 1 TE, 2 WR': 20.0,
+     '6 OL, 0 RB, 2 TE, 2 WR': 20.5, '3 RB, 0 TE, 2 WR': 21.0, '2 QB, 1 RB, 2 TE, 1 WR': 21.5,
+     '2 QB, 1 RB, 0 TE, 3 WR': 22.0,'3 RB, 2 TE, 0 WR': 22.5,
+     '2 RB, 2 TE, 0 WR,1 DL': 23.0, '2 QB, 2 RB, 2 TE, 0 WR': 23.5, '2 QB, 2 RB, 0 TE, 2 WR': 24.0, '2 QB, 3 RB, 1 TE, 0 WR': 24.5,
+     '2 QB, 1 RB, 3 TE, 0 WR': 25.0,
+     '2 QB, 2 RB, 1 TE, 1 WR': 25.5, '2 RB, 1 TE, 1 WR,1 DB': 26.0, '1 RB, 2 TE, 1 WR,1 DB': 26.5,
+     '6 OL, 3 RB, 0 TE, 1 WR': 27.0, '6 OL, 1 RB, 1 TE, 0 WR,2 DL': 27.5}
+    test['OffensePersonnel'] = test['OffensePersonnel'].map(OffensePersonnel)
+    DefensePersonnel = {'2 DL, 3 LB, 6 DB': 0, '4 DL, 4 LB, 3 DB': 0.5, '3 DL, 2 LB, 6 DB': 1.0, '3 DL, 4 LB, 4 DB': 1.5,
+     '3 DL, 3 LB, 5 DB': 2.0, '4 DL, 3 LB, 4 DB': 2.5, '4 DL, 1 LB, 6 DB': 3.0, '4 DL, 2 LB, 5 DB': 3.5,
+     '5 DL, 2 LB, 4 DB': 4.0, '2 DL, 4 LB, 5 DB': 4.5, '2 DL, 5 LB, 4 DB': 5.0, '5 DL, 4 LB, 2 DB': 5.5,
+     '1 DL, 5 LB, 5 DB': 6.0, '5 DL, 3 LB, 3 DB': 6.5, '6 DL, 2 LB, 3 DB': 7.0, '3 DL, 5 LB, 3 DB': 7.5,
+     '6 DL, 3 LB, 2 DB': 8.0, '1 DL, 3 LB, 7 DB': 8.5, '2 DL, 2 LB, 7 DB': 9.0, '4 DL, 5 LB, 2 DB': 9.5,
+     '1 DL, 4 LB, 6 DB': 10.0, '4 DL, 5 LB, 1 DB, 1 OL': 10.5, '6 DL, 1 LB, 4 DB': 11.0, '2 DL, 4 LB, 4 DB, 1 OL': 11.5,
+     '6 DL, 4 LB, 1 DB': 12.0, '5 DL, 1 LB, 5 DB': 12.5, '4 DL, 6 LB, 1 DB': 13.0, '0 DL, 5 LB, 6 DB': 13.5,
+     '5 DL, 4 LB, 1 DB, 1 OL': 14.0, '3 DL, 1 LB, 7 DB': 14.5, '4 DL, 0 LB, 7 DB': 15.0, '3 DL, 4 LB, 3 DB, 1 OL': 15.5,
+     '5 DL, 5 LB, 1 DB': 16.0, '5 DL, 3 LB, 2 DB, 1 OL': 16.5, '0 DL, 6 LB, 5 DB': 17.0, '1 DL, 2 LB, 8 DB': 17.5,
+     '0 DL, 4 LB, 7 DB': 18.0, '7 DL, 2 LB, 2 DB': 18.5}
+    test['DefensePersonnel'] = test['DefensePersonnel'].map(DefensePersonnel)
+    
+    test.fillna(method ='ffill', inplace = True)
+#     x = sc_x.fit_transform(test)
+
+
+    cat_features = []
+    for col in test.columns:
+        if test[col].dtype =='object':
+            cat_features.append(col)
+
+    test = test.drop(cat_features, axis=1)
+    test.fillna(-999, inplace=True)
+    X = np.array(test[players_col]).reshape(-1, len(players_col)*22)
+    play_col = test.drop(players_col, axis=1).columns
+    X_play_col = np.zeros(shape=(X.shape[0], len(play_col)))
+    for i, col in enumerate(play_col):
+        X_play_col[:, i] = test[col][::22]
+    X = np.concatenate([X, X_play_col], axis=1)
+    
+        
+    x = sc_x.fit_transform(X)
+    y_pred = model.predict(x)
+    for pred in y_pred:
+        prev = 0
+        for i in range(len(pred)):
+            if pred[i]<prev:
+                pred[i]=prev
+            prev=pred[i]
+    env.predict(pd.DataFrame(data=y_pred.clip(0,1),columns=sample.columns))
+    return y_pred
+
+#running the iterations 
+for test, sample in tqdm.tqdm(env.iter_test()):
+    make_pred(test, sample,env, model)
+
+#writing the data to file in kaggle format
+#writing our result to file
+env.write_submission_file()
